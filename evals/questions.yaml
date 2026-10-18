@@ -1,0 +1,118 @@
+# Business questions with a hand-written oracle query over the star schema.
+# The deterministic eval checks that the semantic layer gives the oracle's answer.
+# The LLM eval checks that an agent, using only the MCP tools, reaches the same answer.
+# Oracle columns must come in the same order as the request's dimensions + metrics.
+
+- id: total_gross_revenue
+  question: What was the total gross revenue across the whole period?
+  request: { metrics: [gross_revenue] }
+  oracle: SELECT SUM(amount) FROM fact_sales WHERE NOT is_return
+
+- id: revenue_2010
+  question: How much net revenue did we make in calendar year 2010?
+  request: { metrics: [net_revenue], date_from: "2010-01-01", date_to: "2010-12-31" }
+  oracle: SELECT SUM(amount) FROM fact_sales WHERE invoice_ts >= '2010-01-01' AND invoice_ts < '2011-01-01'
+
+- id: top5_countries_revenue
+  question: Which 5 countries generated the most gross revenue?
+  request: { metrics: [gross_revenue], dimensions: [country], limit: 5 }
+  oracle: |
+    SELECT co.country, SUM(f.amount) r FROM fact_sales f JOIN dim_country co USING (country_key)
+    WHERE NOT f.is_return GROUP BY 1 ORDER BY r DESC LIMIT 5
+
+- id: market_share_top_countries
+  question: What share of gross revenue does each of the top 3 countries have?
+  request: { metrics: [gross_revenue], dimensions: [country], limit: 3, with_share: true }
+  oracle: |
+    SELECT co.country, SUM(f.amount) r, SUM(f.amount) / SUM(SUM(f.amount)) OVER () s
+    FROM fact_sales f JOIN dim_country co USING (country_key) WHERE NOT f.is_return
+    GROUP BY 1 ORDER BY r DESC LIMIT 3
+
+- id: orders_by_year
+  question: How many orders did we get each year?
+  request: { metrics: [orders], dimensions: [year], order_by: year, descending: false }
+  oracle: |
+    SELECT d.year, COUNT(DISTINCT f.invoice) FROM fact_sales f JOIN dim_date d USING (date_key)
+    WHERE NOT f.is_return GROUP BY 1 ORDER BY 1
+
+- id: aov_2011
+  question: What was the average order value in 2011?
+  request: { metrics: [aov], date_from: "2011-01-01", date_to: "2011-12-31" }
+  oracle: |
+    SELECT SUM(amount) / COUNT(DISTINCT invoice) FROM fact_sales
+    WHERE NOT is_return AND invoice_ts >= '2011-01-01' AND invoice_ts < '2012-01-01'
+
+- id: return_rate_overall
+  question: What percentage of gross revenue was returned?
+  request: { metrics: [return_rate] }
+  oracle: |
+    SELECT -SUM(amount) FILTER (WHERE is_return) / SUM(amount) FILTER (WHERE NOT is_return)
+    FROM fact_sales
+
+- id: top_products_units
+  question: What are the 10 best-selling products by units?
+  request: { metrics: [units], dimensions: [product], limit: 10 }
+  oracle: |
+    SELECT p.description, SUM(f.quantity) u FROM fact_sales f JOIN dim_product p USING (product_key)
+    WHERE NOT f.is_return GROUP BY 1 ORDER BY u DESC LIMIT 10
+
+- id: monthly_revenue_2011
+  question: Show gross revenue by month for 2011.
+  request:
+    metrics: [gross_revenue]
+    dimensions: [month]
+    date_from: "2011-01-01"
+    date_to: "2011-12-31"
+    order_by: month
+    descending: false
+    limit: 12
+  oracle: |
+    SELECT d.year_month, SUM(f.amount) FROM fact_sales f JOIN dim_date d USING (date_key)
+    WHERE NOT f.is_return AND d.year = 2011 GROUP BY 1 ORDER BY 1
+
+- id: best_quarter
+  question: Which quarter had the highest gross revenue?
+  request: { metrics: [gross_revenue], dimensions: [quarter], limit: 1 }
+  oracle: |
+    SELECT d.year_quarter, SUM(f.amount) r FROM fact_sales f JOIN dim_date d USING (date_key)
+    WHERE NOT f.is_return GROUP BY 1 ORDER BY r DESC LIMIT 1
+
+- id: customers_germany_france
+  question: How many distinct identified customers bought from Germany and from France?
+  request: { metrics: [customers], dimensions: [country], filters: { country: [Germany, France] } }
+  oracle: |
+    SELECT co.country, COUNT(DISTINCT f.customer_key) c FROM fact_sales f
+    JOIN dim_country co USING (country_key)
+    WHERE NOT f.is_return AND f.customer_key <> 0 AND co.country IN ('Germany', 'France')
+    GROUP BY 1 ORDER BY c DESC
+
+- id: returns_by_country_top3
+  question: Which 3 countries returned the most value?
+  request: { metrics: [returns_value], dimensions: [country], limit: 3 }
+  oracle: |
+    SELECT co.country, -SUM(f.amount) v FROM fact_sales f JOIN dim_country co USING (country_key)
+    WHERE f.is_return GROUP BY 1 ORDER BY v DESC LIMIT 3
+
+- id: weekday_orders
+  question: On which day of the week do we get the most orders?
+  request: { metrics: [orders], dimensions: [day_of_week], limit: 1 }
+  oracle: |
+    SELECT d.day_of_week, COUNT(DISTINCT f.invoice) o FROM fact_sales f JOIN dim_date d USING (date_key)
+    WHERE NOT f.is_return GROUP BY 1 ORDER BY o DESC LIMIT 1
+
+- id: uk_q4_2010
+  question: What was gross revenue in the United Kingdom in Q4 2010?
+  request:
+    metrics: [gross_revenue]
+    filters: { country: [United Kingdom], quarter: [2010-Q4] }
+  oracle: |
+    SELECT SUM(f.amount) FROM fact_sales f JOIN dim_country co USING (country_key)
+    JOIN dim_date d USING (date_key)
+    WHERE NOT f.is_return AND co.country = 'United Kingdom' AND d.year_quarter = '2010-Q4'
+
+- id: units_per_order_2010
+  question: How many units and orders did we have in 2010?
+  request: { metrics: [units, orders], date_from: "2010-01-01", date_to: "2010-12-31" }
+  oracle: |
+    SELECT SUM(quantity), COUNT(DISTINCT invoice) FROM fact_sales
+    WHERE NOT is_return AND invoice_ts >= '2010-01-01' AND invoice_ts < '2011-01-01'

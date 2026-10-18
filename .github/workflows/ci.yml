@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - uses: actions/cache@v4
+        with:
+          path: data/online_retail_ii.zip
+          key: online-retail-ii-572e3627
+      - run: uv run zigmo-ingest
+      - run: uv run python evals/run_deterministic.py

@@ -1,0 +1,71 @@
+# zigmo semantic model: one meaning per metric.
+# Agents never write SQL. They ask for metrics, dimensions and filters by name,
+# and the compiler turns them into a single, parameterized query.
+
+name: online_retail
+description: >
+  Merchandise sales of a UK-based online gift retailer, Dec 2009 to Dec 2011
+  (UCI Online Retail II, CC BY 4.0). Postage, fees and stock adjustments are excluded.
+fact:
+  table: fact_sales
+  alias: f
+
+joins:
+  date:     { table: dim_date,     alias: d,  condition: "d.date_key = f.date_key" }
+  product:  { table: dim_product,  alias: p,  condition: "p.product_key = f.product_key" }
+  customer: { table: dim_customer, alias: cu, condition: "cu.customer_key = f.customer_key" }
+  country:  { table: dim_country,  alias: co, condition: "co.country_key = f.country_key" }
+
+metrics:
+  gross_revenue:
+    description: Value of merchandise sold, before returns (GBP).
+    sql: SUM(f.amount)
+    filter: NOT f.is_return
+    format: currency
+  returns_value:
+    description: Value of merchandise returned (GBP, positive number).
+    sql: -SUM(f.amount)
+    filter: f.is_return
+    format: currency
+  net_revenue:
+    description: Gross revenue minus returns (GBP).
+    sql: SUM(f.amount)
+    format: currency
+  orders:
+    description: Number of distinct sales invoices.
+    sql: COUNT(DISTINCT f.invoice)
+    filter: NOT f.is_return
+    format: integer
+  units:
+    description: Units sold, before returns.
+    sql: SUM(f.quantity)
+    filter: NOT f.is_return
+    format: integer
+  customers:
+    description: Distinct identified customers who bought (guest checkouts excluded).
+    sql: COUNT(DISTINCT f.customer_key)
+    filter: NOT f.is_return AND f.customer_key <> 0
+    format: integer
+  aov:
+    description: Average order value = gross_revenue / orders (GBP).
+    derived: "{gross_revenue} / NULLIF({orders}, 0)"
+    format: currency
+  return_rate:
+    description: Share of gross revenue that came back as returns.
+    derived: "{returns_value} / NULLIF({gross_revenue}, 0)"
+    format: percent
+
+dimensions:
+  country:     { sql: co.country,     join: country,  description: Country of the shipping address. }
+  product:     { sql: p.description,  join: product,  description: Product name. }
+  stock_code:  { sql: p.stock_code,   join: product,  description: Product SKU. }
+  customer_id: { sql: cu.customer_id, join: customer, description: Customer identifier (null = guest). }
+  year:        { sql: d.year,         join: date,     description: Calendar year. }
+  quarter:     { sql: d.year_quarter, join: date,     description: "Calendar quarter, e.g. 2010-Q4." }
+  month:       { sql: d.year_month,   join: date,     description: "Calendar month, e.g. 2010-11." }
+  week:        { sql: d.week_start,   join: date,     description: Monday of the week (YYYY-MM-DD). }
+  day:         { sql: d.date,         join: date,     description: Calendar day. }
+  day_of_week: { sql: d.day_of_week,  join: date,     description: Day of the week. }
+
+# Date range filters always apply to the invoice date.
+time_column: f.invoice_ts
